@@ -25,7 +25,7 @@ return {
   make_backups = true,
 
   -- Loading indicator placement (Balatro UI units)
-  loading_align = "cm",
+  loading_align = "bm",
   loading_offset = { x = 0, y = 0 },
 
   -- Framework staging/apply
