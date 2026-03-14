@@ -1,0 +1,32 @@
+==============================================================
+  EXAMPLE — Nexus Mods Provider
+  THIS FILE IS AN EXAMPLE ONLY. It will do nothing here in
+  the repo root. To use it:
+  1. Copy this file into the mod folder you want to auto-update.
+  2. Rename it to exactly  update.json  (remove ".nexus-example").
+  3. Edit the values below to match the mod's Nexus Mods page.
+  4. Make sure your Nexus API key is set in the Auto Mod Updater's
+     in-game settings (only needs to be done once).
+
+  NOTE: update.json is automatically preserved across updates —
+  the updater backs it up and restores it, so you will not lose
+  your config when the mod itself gets updated.
+
+  FIELD REFERENCE:
+  - "provider"               Must be "nexus". (Required)
+  - "mod_id"                 The numeric mod ID from the Nexus URL.
+                             e.g. nexusmods.com/balatro/mods/12345 → 12345. (Required)
+  - "game_domain"            The Nexus game domain string.
+                             Defaults to "balatro" if omitted. (Optional)
+  - "strip_single_top_folder" If true (default), and the zip contains exactly one
+                             top-level folder, its contents are extracted directly into
+                             the mod folder instead of creating a nested sub-folder.
+                             Set to false to disable this behaviour. (Optional)
+==============================================================
+
+{
+    "provider":                 "nexus",
+    "mod_id":                   12345,
+    "game_domain":              "balatro",
+    "strip_single_top_folder":  true
+}
