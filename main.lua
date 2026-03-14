@@ -600,7 +600,7 @@ SMODS.current_mod.extra_tabs = function()
                 { n = G.UIT.O, config = { align = "cm", id = "amu_mod_toggle_list", object = Moveable() } },
               }},
               -- Spacer to push page selector below the toggles
-              { n = G.UIT.B, config = { h = 0.7, w = 0.1 } },
+              { n = G.UIT.B, config = { h = 1.5, w = 0.1 } },
               -- Page selector
               (total_pages > 1) and {
                 n = G.UIT.R, config = { align = "cm", padding = 0.1 }, nodes = {
@@ -655,7 +655,7 @@ G.UIDEF.amu_loading_box = function(ref)
     nodes = {
       { n = G.UIT.C, config = { align = "cm", padding = 0.02, colour = clear }, nodes = {
         { n = G.UIT.T, config = { ref_table = ref, ref_value = "text", scale = 0.72, colour = purple, shadow = true } },
-        { n = G.UIT.B, config = { h = -15.00, w = 0.1 } },
+        { n = G.UIT.B, config = { h = 0.15, w = 0.1 } },
         { n = G.UIT.T, config = { ref_table = ref, ref_value = "suits", scale = 0.7, colour = purple, shadow = true } },
       }}
     }
