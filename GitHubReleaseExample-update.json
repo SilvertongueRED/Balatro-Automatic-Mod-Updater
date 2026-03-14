@@ -3,7 +3,7 @@
   THIS FILE IS AN EXAMPLE ONLY. It will do nothing here in
   the repo root. To use it:
   1. Copy this file into the mod folder you want to auto-update.
-  2. Rename it to exactly  update.json  (remove ".github-example").
+  2. Rename it to exactly  update.json  (remove "GitHubReleaseExample-").
   3. Edit the values below to match the mod's GitHub repository.
 
   NOTE: update.json is automatically preserved across updates —
