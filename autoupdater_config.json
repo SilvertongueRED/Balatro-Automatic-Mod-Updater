@@ -1,0 +1,17 @@
+{
+  "balatro_game_dir": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Balatro",
+  "git_pull_mode": "rebase",
+  "make_backups": true,
+  "nexus_api_key": "CO+HXQbkTE7lIdyOcy1rDDHTSsxPmDFvcubtT/Vja7Zh25NQsDEEPcY=--t/BYDoI8M1b6Nqr5--cvWCFBK1CMStbSX1HPkaWQ==",
+  "nexus_game_domain": "balatro",
+  "skip_folders": [
+    "AutoModUpdater",
+    "_AutoModUpdater_Backups",
+    "smods"
+  ],
+  "update_frameworks": true,
+  "update_git": true,
+  "update_lovely": true,
+  "update_steamodded": true,
+  "update_updatejson": true
+}
