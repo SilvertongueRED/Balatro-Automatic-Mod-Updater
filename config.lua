@@ -25,8 +25,8 @@ return {
   make_backups = true,
 
   -- Loading indicator placement (Balatro UI units)
-  loading_align = "bm",
-  loading_offset = { x = 0, y = -1.8 },
+  loading_align = "tm",
+  loading_offset = { x = 0, y = 2.2 },
 
   -- Framework staging/apply
   framework_pending_file = "pending_apply.json",

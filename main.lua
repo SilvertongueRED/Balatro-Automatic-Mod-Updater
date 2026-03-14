@@ -592,11 +592,11 @@ SMODS.current_mod.extra_tabs = function()
           { n = G.UIT.T, config = { text = "Mod Update Toggles", scale = 0.5, colour = purple, shadow = true } }
         }},
         -- Dynamic placeholder for mod toggles
-        { n = G.UIT.R, config = { align = "cm", padding = 0.05, minh = 4.2, minw = 5.5 }, nodes = {
+        { n = G.UIT.R, config = { align = "cm", padding = 0.05, minh = 3.6, minw = 5.5 }, nodes = {
           { n = G.UIT.O, config = { align = "cm", id = "amu_mod_toggle_list", object = Moveable() } },
         }},
         -- Spacer to push page selector below the toggles
-        { n = G.UIT.B, config = { h = 0.8, w = 0.1 } },
+        { n = G.UIT.B, config = { h = 0.5, w = 0.1 } },
         -- Page selector
         (total_pages > 1) and {
           n = G.UIT.R, config = { align = "cm", padding = 0.55 }, nodes = {
