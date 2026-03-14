@@ -1,0 +1,14 @@
+# Runtime-generated config (written by main.lua, read by autoupdate.ps1)
+autoupdater_config.json
+
+# Update run summary (written by autoupdate.ps1 each run)
+last_run.json
+
+# Backup and staging directories
+_AutoModUpdater_Backups/
+_pending_framework_updates/
+_framework_backups/
+
+# Per-mod updater state
+.autoupdater_state.json
+.framework_state.json
