@@ -39,6 +39,8 @@ try { $selfDirResolved = (Resolve-Path -LiteralPath $SelfDir).Path } catch { $se
 
 try { Ensure-Dir $selfDirResolved } catch { $summary.errors += "Couldn't create SelfDir '$selfDirResolved': $($_.Exception.Message)" }
 
+$selfFolderName = Split-Path -Leaf $selfDirResolved
+
 $summaryPath = Join-Path $selfDirResolved "last_run.json"
 
 
@@ -49,7 +51,7 @@ $defaults = [ordered]@{
   update_git = $true
   update_updatejson = $true
   make_backups = $true
-  skip_folders = @("smods", "AutoModUpdater", "_AutoModUpdater_Backups")
+  skip_folders = @("smods", $selfFolderName, "_AutoModUpdater_Backups")
   nexus_api_key = ""
   nexus_game_domain = "balatro"
   git_pull_mode = "ff-only"  # "ff-only" (default) or "rebase"
@@ -335,7 +337,7 @@ try {
     $name = $_.Name
     $path = $_.FullName
     if ($skipSet.ContainsKey($name)) { return }
-    if ($name -eq "_AutoModUpdater_Backups") { return }
+    if ($name -eq $selfFolderName -or $name -eq "_AutoModUpdater_Backups") { return }
 
     $handled = (Update-GitMod $path $name)
     if (-not $handled) { [void](Update-UpdateJsonMod $path $name) }
