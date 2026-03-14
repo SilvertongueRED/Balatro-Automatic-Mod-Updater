@@ -9,8 +9,8 @@ local config = mod and mod.config or {}
 SMODS.Atlas {
   key = 'modicon',
   path = 'modicon.png',
-  px = 34,
-  py = 34,
+  px = 64,
+  py = 64,
   inject = function(self)
     self.full_path = (self.mod and self.mod.path or SMODS.path) .. self.path
     local file_data = assert(SMODS.NFS.newFileData(self.full_path),
