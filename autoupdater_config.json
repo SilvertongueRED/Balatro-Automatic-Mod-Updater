@@ -5,7 +5,6 @@
   "nexus_api_key": "CO+HXQbkTE7lIdyOcy1rDDHTSsxPmDFvcubtT/Vja7Zh25NQsDEEPcY=--t/BYDoI8M1b6Nqr5--cvWCFBK1CMStbSX1HPkaWQ==",
   "nexus_game_domain": "balatro",
   "skip_folders": [
-    "AutoModUpdater",
     "_AutoModUpdater_Backups",
     "smods"
   ],

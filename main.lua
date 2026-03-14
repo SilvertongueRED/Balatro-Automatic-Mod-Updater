@@ -6,6 +6,16 @@
 local mod = SMODS.current_mod
 local config = mod and mod.config or {}
 
+-- Derive the actual folder name of this mod dynamically so it works
+-- regardless of what the user names the mod folder (e.g. after cloning the repo).
+local mod_folder_name = "AutoModUpdater"
+if mod and mod.path then
+  local name = mod.path:match("([^/\\]+)[/\\]*$")
+  if name and name ~= "" then
+    mod_folder_name = name
+  end
+end
+
 local function is_windows()
   return love and love.system and love.system.getOS and love.system.getOS() == "Windows"
 end
@@ -130,7 +140,7 @@ G.FUNCS = G.FUNCS or {}
 
 local always_skip = {
   ["smods"] = true,
-  ["AutoModUpdater"] = true,
+  [mod_folder_name] = true,
   ["_AutoModUpdater_Backups"] = true,
 }
 
@@ -254,7 +264,7 @@ local function run_manual_check()
 
   local save_dir = love.filesystem.getSaveDirectory()
   local mods_dir = join_path(save_dir, "Mods")
-  local mod_path = (SMODS.current_mod and SMODS.current_mod.path) or join_path(mods_dir, "AutoModUpdater")
+  local mod_path = (SMODS.current_mod and SMODS.current_mod.path) or join_path(mods_dir, mod_folder_name)
 
   pcall(write_ps1_config_overlay)
 
@@ -739,7 +749,7 @@ G.UIDEF.amu_restart_prompt = function(ref)
     if #s > max_len then max_len = #s end
   end
   if #ref.lines > max_show then
-    local s = "(more in AutoModUpdater/last_run.json)"
+    local s = "(more in " .. mod_folder_name .. "/last_run.json)"
     if #s > max_len then max_len = #s end
   end
 
@@ -763,7 +773,7 @@ G.UIDEF.amu_restart_prompt = function(ref)
       n = G.UIT.R,
       config = { align = "cl", padding = 0.01 },
       nodes = {
-        { n = G.UIT.T, config = { text = "(more in AutoModUpdater/last_run.json)", scale = 0.41, colour = purple } }
+        { n = G.UIT.T, config = { text = "(more in " .. mod_folder_name .. "/last_run.json)", scale = 0.41, colour = purple } }
       }
     }
   end
@@ -810,7 +820,7 @@ function G.FUNCS.amu_restart_now(e)
 
   local save_dir = love.filesystem.getSaveDirectory()
   local mods_dir = join_path(save_dir, "Mods")
-  local mod_path = (SMODS.current_mod and SMODS.current_mod.path) or join_path(mods_dir, "AutoModUpdater")
+  local mod_path = (SMODS.current_mod and SMODS.current_mod.path) or join_path(mods_dir, mod_folder_name)
 
   local pending_file = join_path(mod_path, config.framework_pending_file or "pending_apply.json")
   local apply_script  = join_path(mod_path, config.framework_apply_script or "apply_pending.ps1")
@@ -957,7 +967,7 @@ if is_windows() and (config.auto_run ~= false) then
       func = function()
         local save_dir = love.filesystem.getSaveDirectory()
         local mods_dir = join_path(save_dir, "Mods")
-        local mod_path = (SMODS.current_mod and SMODS.current_mod.path) or join_path(mods_dir, "AutoModUpdater")
+        local mod_path = (SMODS.current_mod and SMODS.current_mod.path) or join_path(mods_dir, mod_folder_name)
         run_update_async(mods_dir, mod_path)
         return true
       end
