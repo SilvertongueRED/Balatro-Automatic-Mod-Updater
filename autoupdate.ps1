@@ -140,7 +140,9 @@ function Restore-ModBackup([string]$modName, [string]$backupFile) {
   $gitDir = Join-Path $modPath ".git"
   if (Test-Path -LiteralPath $gitDir -PathType Container) {
     $markerPath = Join-Path $modPath ".amu_restored_backup"
-    try { Set-Content -LiteralPath $markerPath -Value (Get-Date).ToString("o") -Encoding UTF8 } catch {}
+    try { Set-Content -LiteralPath $markerPath -Value (Get-Date).ToString("o") -Encoding UTF8 } catch {
+      $summary.errors += "Failed to create restore marker for ${modName}: $($_.Exception.Message)"
+    }
   }
 
   Remove-Item -LiteralPath $tmpExtract  -Recurse -Force -ErrorAction SilentlyContinue
@@ -209,7 +211,9 @@ function Update-GitMod([string]$folderPath, [string]$folderName) {
     try {
       Run-Git $folderPath @("checkout","--",".") | Out-Null
       Run-Git $folderPath @("clean","-fd") | Out-Null
-    } catch {}
+    } catch {
+      $summary.errors += "Failed to reset working tree for ${folderName} after backup restore: $($_.Exception.Message)"
+    }
   }
 
   try {
