@@ -308,11 +308,7 @@ def _cp_collect_patches(changes: list[dict], granularity: str) -> dict:
         if item:
             categories[cat].add(item)
 
-        keys: list[str] = ["GMCM_EnableMod"]
-        if granularity in ("medium", "high"):
-            keys.append(f"GMCM_Cat_{slugify(cat)}")
-        elif granularity == "low":
-            keys.append(f"GMCM_Cat_{slugify(cat)}")
+        keys: list[str] = ["GMCM_EnableMod", f"GMCM_Cat_{slugify(cat)}"]
 
         if granularity == "high" and item:
             keys.append(f"GMCM_Item_{slugify(cat)}_{slugify(item)}")
@@ -509,9 +505,9 @@ def convert_at_mod(
             "Section": cat,
         }
 
+    type_groups: dict[str, set[str]] = {}
     if granularity in ("medium", "high"):
         # Medium: per-texture-type group toggles
-        type_groups: dict[str, set[str]] = {}
         for t in textures:
             ttype = t.get("Type", "Unknown")
             type_groups.setdefault(ttype, set())
@@ -1117,7 +1113,7 @@ class StardewModConfiguratorApp:
 
 def gui_main() -> None:
     root = tk.Tk()
-    app = StardewModConfiguratorApp(root)  # noqa: F841
+    StardewModConfiguratorApp(root)
     root.mainloop()
 
 
