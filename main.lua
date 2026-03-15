@@ -1195,7 +1195,7 @@ build_backup_mods_page = function(page)
 
       local row_nodes = {
         { n = G.UIT.C, config = { align = "cl", padding = 0.02, minw = 3.2 }, nodes = {
-          { n = G.UIT.T, config = { text = display, scale = 0.34, colour = G.C.UI.TEXT_LIGHT } }
+          { n = G.UIT.T, config = { text = display, scale = 0.45, colour = G.C.UI.TEXT_LIGHT } }
         }},
         { n = G.UIT.B, config = { h = 0.1, w = 0.1 } },
         pin_badge,
