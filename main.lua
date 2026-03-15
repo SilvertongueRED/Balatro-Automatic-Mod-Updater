@@ -572,7 +572,7 @@ local function build_mod_toggles_page(page)
       local row_nodes = {
         -- Mod name as plain text on the left (matching Backups page layout)
         { n = G.UIT.C, config = { align = "cl", padding = 0.02, minw = 3.2 }, nodes = {
-          { n = G.UIT.T, config = { text = entry.display, scale = 0.34, colour = G.C.UI.TEXT_LIGHT } }
+          { n = G.UIT.T, config = { text = entry.display, scale = 0.4, colour = G.C.UI.TEXT_LIGHT } }
         }},
         { n = G.UIT.B, config = { h = 0.1, w = 0.1 } },
         -- Toggle (no label) for consistent sizing and controller navigation
@@ -907,7 +907,7 @@ SMODS.current_mod.extra_tabs = function()
                 n = G.UIT.R, config = { align = "cm", padding = 0.45 }, nodes = {
                   create_option_cycle {
                     w = 4.5,
-                    scale = 0.9,
+                    scale = 0.8,
                     label = "",
                     options = page_options,
                     current_option = AMU_CONFIG_PAGE,
