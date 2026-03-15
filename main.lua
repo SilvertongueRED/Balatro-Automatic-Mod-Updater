@@ -893,8 +893,8 @@ SMODS.current_mod.extra_tabs = function()
           nodes = {
             { n = G.UIT.C, config = { align = "tm", padding = 0.05, minw = 6 }, nodes = {
               -- Header
-              { n = G.UIT.R, config = { align = "cm", padding = 0.15 }, nodes = {
-                { n = G.UIT.T, config = { text = "Mod Update Toggles", scale = 0.5, colour = purple, shadow = true } }
+              { n = G.UIT.R, config = { align = "cm", padding = 0.25 }, nodes = {
+                { n = G.UIT.T, config = { text = "Mod Update Toggles", scale = 0.6, colour = purple, shadow = true } }
               }},
               -- Dynamic placeholder for mod toggles
               { n = G.UIT.R, config = { align = "cm", padding = 0.05, minh = 3.8, minw = 5.5 }, nodes = {
@@ -904,10 +904,10 @@ SMODS.current_mod.extra_tabs = function()
               { n = G.UIT.B, config = { h = 0.1, w = 0.1 } },
               -- Page selector
               (total_pages > 1) and {
-                n = G.UIT.R, config = { align = "cm", padding = 0.35 }, nodes = {
+                n = G.UIT.R, config = { align = "cm", padding = 0.45 }, nodes = {
                   create_option_cycle {
                     w = 4.5,
-                    scale = 0.7,
+                    scale = 0.9,
                     label = "",
                     options = page_options,
                     current_option = AMU_CONFIG_PAGE,
