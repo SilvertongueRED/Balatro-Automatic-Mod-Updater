@@ -1,3 +1,3 @@
 # Balatro-Mod-Updater
-Updates (and makes backups of) any balatro mod and frameworks (Steamodded and Lovely Injector). It can do this automatically at startup or manually all at once (the default behavior) or individually automatically or manually per mod. 
+Updates (and makes backups of) any balatro mod and frameworks (Steamodded and Lovely Injector). 
 It does this directly from noticing any changes to a mod you've downloaded from its Git page, its Git Release version, or its Nexus Mods page. Also creates backups of any mod/framework that's updated, gives an option to restart now or later after those updates, in-game configs for pasting your Nexus mods API key, and in-game configs for checking for updates after startup and individually toggling off mods for update checking. Auto-checking at startup is off by default — enable it in the mod's config tab. You can also check individual mods for updates via per-mod "Check" buttons in the Mod Toggles tab.
