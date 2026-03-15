@@ -570,21 +570,22 @@ local function build_mod_toggles_page(page)
 
       rows[#rows+1] = {
         n = G.UIT.R, config = { align = "cl", padding = 0.02 }, nodes = {
-          create_toggle {
-            label = entry.display,
-            ref_table = config.mod_update_enabled,
-            ref_value = entry.folder,
-            w = 0,
-            scale = 0.35,
-            callback = function()
-              write_ps1_config_overlay()
-            end
-          },
+          { n = G.UIT.C, config = { align = "cl", padding = 0, minw = 3.5 }, nodes = {
+            create_toggle {
+              label = entry.display,
+              ref_table = config.mod_update_enabled,
+              ref_value = entry.folder,
+              scale = 0.3,
+              callback = function()
+                write_ps1_config_overlay()
+              end
+            },
+          }},
           { n = G.UIT.C, config = { align = "cm", padding = 0.03, minw = 0.9, minh = 0.34, r = 0.08,
             colour = check_colour, button = "amu_check_mod_" .. row_i, hover = true, shadow = true }, nodes = {
             { n = G.UIT.T, config = { text = "Check", scale = 0.26, colour = G.C.UI.TEXT_LIGHT } }
           }},
-          { n = G.UIT.C, config = { align = "cl", padding = 0.02, minw = 1.1 }, nodes = {
+          { n = G.UIT.C, config = { align = "cl", padding = 0.02, minw = 1.0 }, nodes = {
             { n = G.UIT.T, config = { ref_table = amu_per_mod_status, ref_value = folder, scale = 0.24, colour = G.C.UI.TEXT_LIGHT } }
           }},
         }
@@ -886,11 +887,11 @@ SMODS.current_mod.extra_tabs = function()
                 { n = G.UIT.T, config = { text = "Mod Update Toggles", scale = 0.5, colour = purple, shadow = true } }
               }},
               -- Dynamic placeholder for mod toggles
-              { n = G.UIT.R, config = { align = "cm", padding = 0.2, minh = 4.5, minw = 5.5 }, nodes = {
+              { n = G.UIT.R, config = { align = "cm", padding = 0.05, minh = 3.8, minw = 5.5 }, nodes = {
                 { n = G.UIT.O, config = { align = "cm", id = "amu_mod_toggle_list", object = Moveable() } },
               }},
               -- Spacer to push page selector below the toggles
-              { n = G.UIT.B, config = { h = 1.5, w = 0.1 } },
+              { n = G.UIT.B, config = { h = 0.05, w = 0.1 } },
               -- Page selector
               (total_pages > 1) and {
                 n = G.UIT.R, config = { align = "cm", padding = 0.1 }, nodes = {
@@ -948,7 +949,7 @@ SMODS.current_mod.extra_tabs = function()
                 { n = G.UIT.T, config = { text = "Mod Backups & Pinning", scale = 0.5, colour = purple, shadow = true } }
               }},
               -- Dynamic placeholder for backup mod list
-              { n = G.UIT.R, config = { align = "cm", padding = 0.2, minh = 4.5, minw = 5.5 }, nodes = {
+              { n = G.UIT.R, config = { align = "cm", padding = 0.05, minh = 3.8, minw = 5.5 }, nodes = {
                 { n = G.UIT.O, config = { align = "cm", id = "amu_backup_mod_list", object = Moveable() } },
               }},
               -- Status line
@@ -956,7 +957,7 @@ SMODS.current_mod.extra_tabs = function()
                 { n = G.UIT.T, config = { ref_table = amu_backup_status, ref_value = "text", scale = 0.3, colour = purple } }
               }},
               -- Spacer
-              { n = G.UIT.B, config = { h = 0.8, w = 0.1 } },
+              { n = G.UIT.B, config = { h = 0.05, w = 0.1 } },
               -- Page selector
               (total_pages > 1) and {
                 n = G.UIT.R, config = { align = "cm", padding = 0.1 }, nodes = {
@@ -1184,7 +1185,7 @@ build_backup_mods_page = function(page)
       end
 
       local row_nodes = {
-        { n = G.UIT.C, config = { align = "cl", padding = 0.02, minw = 2.3 }, nodes = {
+        { n = G.UIT.C, config = { align = "cl", padding = 0.02, minw = 3.2 }, nodes = {
           { n = G.UIT.T, config = { text = display, scale = 0.34, colour = G.C.UI.TEXT_LIGHT } }
         }},
         { n = G.UIT.B, config = { h = 0.1, w = 0.1 } },
