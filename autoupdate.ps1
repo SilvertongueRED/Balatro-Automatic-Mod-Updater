@@ -37,6 +37,9 @@ $summary = @{
   errors = @()
 }
 
+# Tracks mods updated this run so crash detection can roll them back if needed
+$recentlyUpdatedEntries = [System.Collections.Generic.List[hashtable]]::new()
+
 try { $modsDirResolved = (Resolve-Path -LiteralPath $ModsDir).Path } catch { $modsDirResolved = $ModsDir; $summary.errors += "Resolve-Path failed for ModsDir '$ModsDir': $($_.Exception.Message)" }
 try { $selfDirResolved = (Resolve-Path -LiteralPath $SelfDir).Path } catch { $selfDirResolved = $SelfDir; $summary.errors += "Resolve-Path failed for SelfDir '$SelfDir': $($_.Exception.Message)" }
 
@@ -44,7 +47,10 @@ try { Ensure-Dir $selfDirResolved } catch { $summary.errors += "Couldn't create 
 
 $selfFolderName = Split-Path -Leaf $selfDirResolved
 
-$summaryPath = Join-Path $selfDirResolved "last_run.json"
+$summaryPath           = Join-Path $selfDirResolved "last_run.json"
+$recentlyUpdatedPath   = Join-Path $selfDirResolved "_recently_updated.json"
+$launchSentinelPath    = Join-Path $selfDirResolved "_launch_sentinel"
+$crashReportPath       = Join-Path $selfDirResolved "_crash_rollback_report.json"
 
 
 # early save: create/refresh last_run.json immediately so you can confirm the script actually ran
@@ -86,14 +92,16 @@ $backupRoot = Join-Path $modsDirResolved "_Balatro-Mod-Updater_Backups"
 try { Ensure-Dir $backupRoot } catch { $summary.errors += "Couldn't create backup folder '$backupRoot': $($_.Exception.Message)" }
 
 function Backup-Folder([string]$folderPath, [string]$folderName) {
-  if (-not $config.make_backups) { return }
+  if (-not $config.make_backups) { return $null }
   $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
   $dest = Join-Path $backupRoot "$folderName-$stamp.zip"
   try {
     if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Force }
     Compress-Archive -Path (Join-Path $folderPath "*") -DestinationPath $dest -Force
+    return (Split-Path -Leaf $dest)
   } catch {
     $summary.errors += "Backup failed for ${folderName}: $($_.Exception.Message)"
+    return $null
   }
 }
 
@@ -165,6 +173,78 @@ if ($config.pinned_mods) {
   } catch {
     $summary.errors += "Failed to parse pinned_mods from config: $($_.Exception.Message)"
   }
+}
+
+# ---- Sentinel-based crash detection ----
+# Only active in normal update mode (not restore-only and not single-mod target).
+if ($RestoreModName -eq "" -and $TargetMod -eq "") {
+  $sentinelExists    = Test-Path -LiteralPath $launchSentinelPath
+  $recentlyUpdExists = Test-Path -LiteralPath $recentlyUpdatedPath
+
+  if ($recentlyUpdExists -and $sentinelExists) {
+    # Both exist: game started fine after the last update. Clean up.
+    Remove-Item -LiteralPath $recentlyUpdatedPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $launchSentinelPath  -Force -ErrorAction SilentlyContinue
+  } elseif ($recentlyUpdExists -and -not $sentinelExists) {
+    # _recently_updated.json exists but no sentinel: game crashed after the last update.
+    $recentlyUpdated = Read-JsonIfExists $recentlyUpdatedPath
+    if ($recentlyUpdated) {
+      if (-not $config.pinned_mods) { $config.pinned_mods = [PSCustomObject]@{} }
+      $rollbackReport = @{ rolled_back_at = (Get-Date).ToString("o"); mods = @() }
+
+      foreach ($entry in $recentlyUpdated) {
+        $modName    = [string]$entry.mod_name
+        $backupFile = [string]$entry.backup_file
+        $crashedVer = if ($entry.updated_to_version) { [string]$entry.updated_to_version } else { "" }
+        if (-not $modName) { continue }
+
+        try {
+          if ($backupFile -and (Test-Path -LiteralPath (Join-Path $backupRoot $backupFile))) {
+            Restore-ModBackup $modName $backupFile
+
+            # Pin the mod to prevent it re-updating until the user unpins it
+            $pinInfo = [PSCustomObject]@{
+              pinned           = $true
+              backup_file      = $backupFile
+              pinned_at        = (Get-Date).ToString("o")
+              auto_rolled_back = $true
+              crashed_version  = $crashedVer
+            }
+            $config.pinned_mods | Add-Member -NotePropertyName $modName -NotePropertyValue $pinInfo -Force
+            $skipSet[$modName]   = $true
+            $pinnedSet[$modName] = $true
+
+            $summary.skipped_mods += "$modName (auto-rolled-back after startup crash)"
+            $rollbackReport.mods  += @{ mod_name = $modName; backup_file = $backupFile; crashed_version = $crashedVer }
+          } else {
+            $errMsg = if ($backupFile) { "backup file not found: $backupFile" } else { "no backup file recorded" }
+            $summary.errors      += "Auto-rollback skipped for ${modName}: $errMsg"
+            $rollbackReport.mods += @{ mod_name = $modName; backup_file = $backupFile; error = $errMsg }
+          }
+        } catch {
+          $summary.errors      += "Auto-rollback failed for ${modName}: $($_.Exception.Message)"
+          $rollbackReport.mods += @{ mod_name = $modName; backup_file = $backupFile; error = $_.Exception.Message }
+        }
+      }
+
+      # Persist the updated config so the Lua side also knows about the new pins on next run
+      try { Save-JsonNoBom $configPath $config } catch {
+        $summary.errors += "Failed to save config after crash rollback: $($_.Exception.Message)"
+      }
+
+      # Write the crash rollback report so the Lua mod can notify the user in-game
+      if ($rollbackReport.mods.Count -gt 0) {
+        try { Save-JsonNoBom $crashReportPath $rollbackReport } catch {
+          $summary.errors += "Failed to write crash rollback report: $($_.Exception.Message)"
+        }
+      }
+    }
+    Remove-Item -LiteralPath $recentlyUpdatedPath -Force -ErrorAction SilentlyContinue
+  } elseif ($sentinelExists) {
+    # Sentinel exists but no recently_updated.json: stale sentinel from a run with no updates.
+    Remove-Item -LiteralPath $launchSentinelPath -Force -ErrorAction SilentlyContinue
+  }
+  # else: neither file exists — first run or already cleaned up. Nothing to do.
 }
 
 # Restore-only mode: when called with -RestoreModName and -RestoreBackupFile, just restore and exit.
@@ -248,7 +328,7 @@ function Update-GitMod([string]$folderPath, [string]$folderName) {
       return $true
     }
 
-    Backup-Folder $folderPath $folderName
+    $bkFile = Backup-Folder $folderPath $folderName
     $oldHead = $local
 
     # Stash any local changes to prevent "Your local changes would be
@@ -283,12 +363,14 @@ function Update-GitMod([string]$folderPath, [string]$folderName) {
     if ($newHeadRes.code -ne 0) {
       # Can't verify; report as updated conservatively
       $summary.updated_mods += $folderName
+      $recentlyUpdatedEntries.Add(@{ mod_name = $folderName; backup_file = if ($bkFile) { $bkFile } else { "" }; updated_to_version = ""; updated_at = (Get-Date).ToString("o") })
       return $true
     }
     $newHead = ($newHeadRes.out | Select-Object -First 1).Trim()
 
     if ($newHead -and $newHead -ne $oldHead) {
       $summary.updated_mods += $folderName
+      $recentlyUpdatedEntries.Add(@{ mod_name = $folderName; backup_file = if ($bkFile) { $bkFile } else { "" }; updated_to_version = $newHead; updated_at = (Get-Date).ToString("o") })
     } else {
       $summary.skipped_mods += "$folderName (git: no changes applied)"
     }
@@ -318,7 +400,7 @@ function Update-GitHubReleaseMod([string]$folderPath, [string]$folderName, $uj) 
   $dl = [string]$asset.browser_download_url
   if (-not $dl) { throw "GitHub asset missing browser_download_url." }
 
-  Backup-Folder $folderPath $folderName
+  $bkFile = Backup-Folder $folderPath $folderName
 
   $tmpRoot = Join-Path ([IO.Path]::GetTempPath()) ("balatro_ghupd_" + [Guid]::NewGuid().ToString("N"))
   Ensure-Dir $tmpRoot
@@ -357,6 +439,7 @@ function Update-GitHubReleaseMod([string]$folderPath, [string]$folderName, $uj) 
 
   Save-JsonNoBom $statePath @{ provider="github"; tag=$tag; repo=$repo; updated_at=(Get-Date).ToString("o") }
   $summary.updated_mods += $folderName
+  $recentlyUpdatedEntries.Add(@{ mod_name = $folderName; backup_file = if ($bkFile) { $bkFile } else { "" }; updated_to_version = $tag; updated_at = (Get-Date).ToString("o") })
   Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue
   return $true
 }
@@ -393,7 +476,7 @@ function Update-NexusMod([string]$folderPath, [string]$folderName, $uj) {
   if (-not $dl -or $dl.Count -lt 1 -or -not $dl[0].URI) { throw "Nexus download_link.json returned no usable URI." }
   $uri = [string]$dl[0].URI
 
-  Backup-Folder $folderPath $folderName
+  $bkFile = Backup-Folder $folderPath $folderName
 
   $tmpRoot = Join-Path ([IO.Path]::GetTempPath()) ("balatro_nexusupd_" + [Guid]::NewGuid().ToString("N"))
   Ensure-Dir $tmpRoot
@@ -430,6 +513,7 @@ function Update-NexusMod([string]$folderPath, [string]$folderName, $uj) {
 
   Save-JsonNoBom $statePath @{ provider="nexus"; game_domain=$domain; mod_id=$modId; file_id=$latestFileId; updated_at=(Get-Date).ToString("o") }
   $summary.updated_mods += $folderName
+  $recentlyUpdatedEntries.Add(@{ mod_name = $folderName; backup_file = if ($bkFile) { $bkFile } else { "" }; updated_to_version = [string]$latestFileId; updated_at = (Get-Date).ToString("o") })
   Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue
   return $true
 }
@@ -465,7 +549,34 @@ try {
     if ($targetModFilter -ne "" -and $name -ne $targetModFilter) { return }
     if ($skipSet.ContainsKey($name)) {
       if ($pinnedSet.ContainsKey($name)) {
-        $summary.skipped_mods += "$name (pinned at backup)"
+        $skippedMsg = "$name (pinned at backup)"
+        # For auto-rolled-back mods, check whether a newer GitHub release version
+        # is now available (different from the version that caused the crash).
+        $pinInfo = $null
+        try {
+          if ($config.pinned_mods -is [System.Collections.IDictionary]) {
+            $pinInfo = $config.pinned_mods[$name]
+          } else {
+            $pinInfo = $config.pinned_mods.$name
+          }
+        } catch {}
+        if ($pinInfo -and $pinInfo.auto_rolled_back -and $pinInfo.crashed_version) {
+          $updateJsonPath2 = Join-Path $path "update.json"
+          if (Test-Path -LiteralPath $updateJsonPath2) {
+            $uj2 = Read-JsonIfExists $updateJsonPath2
+            if ($uj2 -and [string]$uj2.provider -eq "github" -and $uj2.repo) {
+              try {
+                $api2  = "https://api.github.com/repos/$([string]$uj2.repo)/releases/latest"
+                $rel2  = Invoke-RestMethod -Uri $api2 -Headers @{ "User-Agent"="BalatroModUpdater"; "Accept"="application/vnd.github+json" }
+                $tag2  = [string]$rel2.tag_name
+                if ($tag2 -and $tag2 -ne [string]$pinInfo.crashed_version) {
+                  $skippedMsg = "$name (pinned - newer version $tag2 available, consider unpinning)"
+                }
+              } catch {}
+            }
+          }
+        }
+        $summary.skipped_mods += $skippedMsg
       } else {
         $summary.skipped_mods += "$name (updates disabled)"
       }
@@ -480,6 +591,15 @@ try {
   }
 } catch {
   $summary.errors += "Top-level scan failed: $($_.Exception.Message)"
+}
+
+# Write _recently_updated.json so that crash detection on the next run can roll
+# back these mods if the game fails to start after this update.
+# Skipped in single-mod-check and restore-only modes to avoid false detections.
+if ($recentlyUpdatedEntries.Count -gt 0 -and $RestoreModName -eq "" -and $targetModFilter -eq "") {
+  try { Save-JsonNoBom $recentlyUpdatedPath $recentlyUpdatedEntries } catch {
+    $summary.errors += "Failed to write _recently_updated.json: $($_.Exception.Message)"
+  }
 }
 
 
