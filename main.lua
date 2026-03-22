@@ -1472,8 +1472,8 @@ local function on_full_update_done(mod_path)
             -- Sync the rollback pin into the Lua runtime config so the UI
             -- shows the correct pinned state and write_ps1_config_overlay
             -- preserves it on the next write.
-            if not config.mod_pinned then config.mod_pinned = {} end
-            if not config.mod_update_enabled then config.mod_update_enabled = {} end
+            config.mod_pinned = config.mod_pinned or {}
+            config.mod_update_enabled = config.mod_update_enabled or {}
             config.mod_pinned[entry.mod_name] = {
               pinned = true,
               backup_file = tostring(entry.backup_file or ""),

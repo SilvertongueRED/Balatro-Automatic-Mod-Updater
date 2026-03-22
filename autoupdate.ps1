@@ -561,6 +561,9 @@ try {
           }
         } catch {}
         if ($pinInfo -and $pinInfo.auto_rolled_back -and $pinInfo.crashed_version) {
+          # Check for a newer GitHub release so the user knows when it's safe to unpin.
+          # This makes one unauthenticated API call per auto-rolled-back GitHub mod per run;
+          # failures are silently ignored (rate limits, network errors, etc.).
           $updateJsonPath2 = Join-Path $path "update.json"
           if (Test-Path -LiteralPath $updateJsonPath2) {
             $uj2 = Read-JsonIfExists $updateJsonPath2
