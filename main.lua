@@ -397,10 +397,10 @@ local function run_manual_check()
           else
             amu_check_status.text = "All mods up to date!"
           end
-          show_prompt(summary)
         else
           amu_check_status.text = msg == "done" and "Done!" or "Error running script."
         end
+        on_full_update_done(mod_path)
         return true
       end
       return false
@@ -1437,6 +1437,92 @@ local function read_summary(mod_path)
   return decode_json(data)
 end
 
+-- Write the launch sentinel so PS1 knows the game started successfully after
+-- the most recent update run (used for crash detection on the next PS1 run).
+local function write_launch_sentinel(mod_path)
+  if not is_windows() then return end
+  if not mod_path or mod_path == "" then return end
+  pcall(function()
+    local f = io.open(join_path(mod_path, "_launch_sentinel"), "wb")
+    if f then
+      f:write(os.date("!%Y-%m-%dT%H:%M:%SZ"))
+      f:close()
+    end
+  end)
+end
+
+-- Called after every full (non-single-mod) PS1 run completes.
+-- Writes the launch sentinel, processes any crash rollback report, and shows
+-- the appropriate in-game notification to the user.
+local function on_full_update_done(mod_path)
+  write_launch_sentinel(mod_path)
+
+  -- Process crash rollback report (written by PS1 when it detects a crash)
+  local rollback_mods = {}
+  local report_path = join_path(mod_path, "_crash_rollback_report.json")
+  if file_exists(report_path) then
+    local data = read_all(report_path)
+    pcall(function() os.remove(report_path) end)
+    local report = data and decode_json(data)
+    if report and report.mods then
+      for _, entry in ipairs(report.mods) do
+        if entry.mod_name then
+          if not entry.error then
+            rollback_mods[#rollback_mods + 1] = tostring(entry.mod_name)
+            -- Sync the rollback pin into the Lua runtime config so the UI
+            -- shows the correct pinned state and write_ps1_config_overlay
+            -- preserves it on the next write.
+            config.mod_pinned = config.mod_pinned or {}
+            config.mod_update_enabled = config.mod_update_enabled or {}
+            config.mod_pinned[entry.mod_name] = {
+              pinned = true,
+              backup_file = tostring(entry.backup_file or ""),
+              pinned_at = tostring(report.rolled_back_at or os.date("!%Y-%m-%dT%H:%M:%SZ")),
+              auto_rolled_back = true,
+            }
+            config.mod_update_enabled[entry.mod_name] = false
+          end
+        end
+      end
+      if #rollback_mods > 0 then
+        pcall(write_ps1_config_overlay)
+      end
+    end
+  end
+
+  local summary = read_summary(mod_path)
+
+  if #rollback_mods > 0 then
+    -- Show crash notification (with optional update info appended)
+    local lines = {
+      "Crash detected! The following mod(s) caused",
+      "a startup crash and were reverted to their",
+      "previous version and pinned:",
+      "",
+    }
+    for _, name in ipairs(rollback_mods) do
+      lines[#lines + 1] = "  " .. name
+    end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "These mods won't update until you manually"
+    lines[#lines + 1] = "unpin them in Mod Updater settings."
+    if summary and #(summary.updated_mods or {}) > 0 then
+      lines[#lines + 1] = ""
+      lines[#lines + 1] = "Also updated " .. #summary.updated_mods .. " other mod(s)."
+    end
+    if summary and #(summary.errors or {}) > 0 then
+      lines[#lines + 1] = ""
+      lines[#lines + 1] = "Update errors: " .. #(summary.errors or {})
+    end
+    AMU_PROMPT.title    = "Mod Updater - Crash Detected"
+    AMU_PROMPT.lines    = wrap_lines(lines, 46)
+    AMU_PROMPT.has_updates = (summary ~= nil and #(summary.updated_mods or {}) > 0)
+    open_overlay(G.UIDEF.amu_restart_prompt(AMU_PROMPT))
+  elseif summary then
+    show_prompt(summary)
+  end
+end
+
 local function run_update_async(mods_dir, mod_path)
   pcall(write_ps1_config_overlay)
 
@@ -1482,8 +1568,7 @@ local function run_update_async(mods_dir, mod_path)
       "-SelfDir", safe_quote(winpath(mod_path)),
     }, " ")
     os.execute(cmd)
-    local summary = read_summary(mod_path)
-    if summary then show_prompt(summary) end
+    on_full_update_done(mod_path)
     return
   end
 
@@ -1526,8 +1611,7 @@ local function run_update_async(mods_dir, mod_path)
       local msg = channel:pop()
       if msg then
         close_overlay()
-        local summary = read_summary(mod_path)
-        if summary then show_prompt(summary) end
+        on_full_update_done(mod_path)
         return true
       end
 
