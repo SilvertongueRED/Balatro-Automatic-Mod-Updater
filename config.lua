@@ -51,4 +51,11 @@ return {
 
   -- Nexus API key (stored here so SMODS persists it; written to autoupdater_config.json)
   nexus_api_key = "",
+
+  -- Fork discovery (manual trigger only; never runs automatically on startup)
+  check_forks = false,
+
+  -- Per-mod fork tracking: which fork source is currently in use
+  -- Keys are folder names; values are { fork_repo="owner/repo", original_repo="owner/repo", switched_at="ISO" }
+  mod_fork_source = {},
 }

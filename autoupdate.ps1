@@ -3,7 +3,11 @@ param(
   [Parameter(Mandatory=$true)][string]$SelfDir,
   [string]$RestoreModName = "",
   [string]$RestoreBackupFile = "",
-  [string]$TargetMod = ""
+  [string]$TargetMod = "",
+  [switch]$CheckForks,
+  [string]$SwitchModName = "",
+  [string]$SwitchToForkRepo = "",
+  [string]$SwitchBackModName = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +55,7 @@ $summaryPath           = Join-Path $selfDirResolved "last_run.json"
 $recentlyUpdatedPath   = Join-Path $selfDirResolved "_recently_updated.json"
 $launchSentinelPath    = Join-Path $selfDirResolved "_launch_sentinel"
 $crashReportPath       = Join-Path $selfDirResolved "_crash_rollback_report.json"
+$forkSuggestionsPath   = Join-Path $selfDirResolved "fork_suggestions.json"
 
 
 # early save: create/refresh last_run.json immediately so you can confirm the script actually ran
@@ -541,6 +546,276 @@ function Update-UpdateJsonMod([string]$folderPath, [string]$folderName) {
   }
 }
 
+# ---- Fork Discovery & Switching ----
+
+function Get-GitHubRepoForMod([string]$folderPath) {
+  $gitDir = Join-Path $folderPath ".git"
+  if (Test-Path -LiteralPath $gitDir) {
+    $remoteRes = Run-Git $folderPath @("remote", "get-url", "origin")
+    if ($remoteRes.code -eq 0) {
+      $url = ($remoteRes.out | Select-Object -First 1).Trim()
+      if ($url -match "github\.com[:/](.+?/[^./]+?)(\.git)?$") {
+        return $Matches[1]
+      }
+    }
+  }
+  $ujPath = Join-Path $folderPath "update.json"
+  if (Test-Path -LiteralPath $ujPath) {
+    $uj = Read-JsonIfExists $ujPath
+    if ($uj -and [string]$uj.provider -eq "github" -and $uj.repo) {
+      return [string]$uj.repo
+    }
+  }
+  return $null
+}
+
+function Get-GitDefaultBranch([string]$folderPath) {
+  $branchRes = Run-Git $folderPath @("symbolic-ref", "refs/remotes/origin/HEAD")
+  if ($branchRes.code -eq 0) {
+    $ref = ($branchRes.out | Select-Object -First 1).Trim()
+    if ($ref -match "refs/remotes/origin/(.+)$") { return $Matches[1] }
+  }
+  return "main"
+}
+
+function Check-Forks() {
+  $suggestions = @{
+    checked_at  = (Get-Date).ToString("o")
+    suggestions = @{}
+  }
+
+  try {
+    $ghHeaders = @{ "User-Agent"="BalatroModUpdater"; "Accept"="application/vnd.github+json" }
+
+    Get-ChildItem -LiteralPath $modsDirResolved -Directory -Force | ForEach-Object {
+      $name = $_.Name
+      $path = $_.FullName
+      if ($skipSet.ContainsKey($name)) { return }
+      if ($name -eq "_Balatro-Mod-Updater_Backups") { return }
+      if ($name -eq "_Balatro-Automatic-Mod-Updater_Backups") { return }
+      if ($name -eq "_AutoModUpdater_Backups") { return }
+
+      try {
+        $ownerRepo = Get-GitHubRepoForMod $path
+        if (-not $ownerRepo) { return }
+
+        # Fetch original repo metadata
+        $origInfo      = Invoke-RestMethod -Uri "https://api.github.com/repos/$ownerRepo" -Headers $ghHeaders
+        $origPushedAt  = [datetime]$origInfo.pushed_at
+        $defaultBranch = if ($origInfo.default_branch) { [string]$origInfo.default_branch } else { "main" }
+
+        # Fetch forks sorted by most recently pushed
+        $forks = Invoke-RestMethod -Uri "https://api.github.com/repos/$ownerRepo/forks?sort=pushed&per_page=10" -Headers $ghHeaders
+
+        $activeForks = @()
+        foreach ($fork in $forks) {
+          try {
+            $forkOwner    = [string]$fork.owner.login
+            $forkPushedAt = [datetime]$fork.pushed_at
+            $forkBranch   = if ($fork.default_branch) { [string]$fork.default_branch } else { $defaultBranch }
+
+            # Only consider forks pushed more recently than the original
+            if ($forkPushedAt -le $origPushedAt) { continue }
+
+            # Get commit comparison
+            $compareUrl = "https://api.github.com/repos/$ownerRepo/compare/${defaultBranch}...${forkOwner}:${forkBranch}"
+            $compare    = Invoke-RestMethod -Uri $compareUrl -Headers $ghHeaders
+
+            $commitsAhead  = if ($compare.ahead_by)  { [int]$compare.ahead_by  } else { 0 }
+            $commitsBehind = if ($compare.behind_by) { [int]$compare.behind_by } else { 0 }
+
+            # Only include forks that have commits the original doesn't
+            if ($commitsAhead -eq 0) { continue }
+
+            # Build changelog (up to 20 most recent commit messages, first line only)
+            $changelog = @()
+            if ($compare.commits) {
+              $limit = [Math]::Min($compare.commits.Count, 20)
+              for ($i = 0; $i -lt $limit; $i++) {
+                $msg = $compare.commits[$i].commit.message
+                if ($msg) {
+                  $firstLine = ($msg -split "`n")[0].Trim()
+                  $changelog += $firstLine
+                }
+              }
+            }
+
+            # Check for a GitHub release on the fork (best-effort)
+            $releaseTag   = ""
+            $releaseNotes = ""
+            try {
+              $rel          = Invoke-RestMethod -Uri "https://api.github.com/repos/$forkOwner/$($fork.name)/releases/latest" -Headers $ghHeaders
+              $releaseTag   = if ($rel.tag_name) { [string]$rel.tag_name } else { "" }
+              $releaseNotes = if ($rel.body)     { [string]$rel.body     } else { "" }
+            } catch {}
+
+            $activeForks += @{
+              repo                 = "$forkOwner/$($fork.name)"
+              owner                = $forkOwner
+              pushed_at            = $fork.pushed_at
+              stars                = [int]$fork.stargazers_count
+              commits_ahead        = $commitsAhead
+              commits_behind       = $commitsBehind
+              changelog            = $changelog
+              latest_release_tag   = $releaseTag
+              latest_release_notes = $releaseNotes
+              html_url             = [string]$fork.html_url
+            }
+          } catch {
+            # Skip individual fork errors silently (rate limits, network errors, etc.)
+          }
+        }
+
+        if ($activeForks.Count -gt 0) {
+          $suggestions.suggestions[$name] = @{
+            current_repo = $ownerRepo
+            forks        = $activeForks
+          }
+        }
+      } catch {
+        # Skip per-mod errors silently so one failure doesn't abort the whole scan
+      }
+    }
+  } catch {
+    $summary.errors += "Fork scan failed: $($_.Exception.Message)"
+  }
+
+  try { Save-JsonNoBom $forkSuggestionsPath $suggestions } catch {
+    $summary.errors += "Failed to write fork_suggestions.json: $($_.Exception.Message)"
+  }
+}
+
+function Switch-ToFork([string]$modName, [string]$forkRepo) {
+  $modPath = Join-Path $modsDirResolved $modName
+  if (-not (Test-Path -LiteralPath $modPath)) { throw "Mod folder not found: $modPath" }
+
+  # Back up current version before switching
+  Backup-Folder $modPath $modName | Out-Null
+
+  $statePath = Join-Path $modPath ".autoupdater_state.json"
+  $state     = Read-JsonIfExists $statePath
+  if (-not $state) { $state = @{} }
+
+  $gitDir = Join-Path $modPath ".git"
+  if (Test-Path -LiteralPath $gitDir) {
+    # Git mod: store original remote, point to fork, fetch and hard-reset
+    $currentRemote = Run-Git $modPath @("remote", "get-url", "origin")
+    if ($currentRemote.code -eq 0) {
+      $url = ($currentRemote.out | Select-Object -First 1).Trim()
+      if ($url -match "github\.com[:/](.+?/[^./]+?)(\.git)?$") {
+        if (-not $state.original_repo) {
+          $state | Add-Member -NotePropertyName "original_repo" -NotePropertyValue $Matches[1] -Force
+        }
+      }
+    }
+
+    $newUrl    = "https://github.com/$forkRepo.git"
+    $setUrlRes = Run-Git $modPath @("remote", "set-url", "origin", $newUrl)
+    if ($setUrlRes.code -ne 0) { throw "Failed to set remote URL: " + (Short-Out $setUrlRes.out) }
+
+    $fetchRes = Run-Git $modPath @("fetch", "origin")
+    if ($fetchRes.code -ne 0) { throw "Failed to fetch from fork: " + (Short-Out $fetchRes.out) }
+
+    $forkBranch = Get-GitDefaultBranch $modPath
+    $resetRes   = Run-Git $modPath @("reset", "--hard", "origin/$forkBranch")
+    if ($resetRes.code -ne 0) { throw "Failed to reset to fork HEAD: " + (Short-Out $resetRes.out) }
+
+    $state | Add-Member -NotePropertyName "fork_repo"    -NotePropertyValue $forkRepo -Force
+    $state | Add-Member -NotePropertyName "switched_at"  -NotePropertyValue (Get-Date).ToString("o") -Force
+    Save-JsonNoBom $statePath $state
+  } else {
+    # update.json mod: rewrite the repo field, clear state so next update picks up the fork's releases
+    $ujPath = Join-Path $modPath "update.json"
+    if (Test-Path -LiteralPath $ujPath) {
+      $uj = Read-JsonIfExists $ujPath
+      if ($uj) {
+        if (-not $state.original_repo) {
+          $state | Add-Member -NotePropertyName "original_repo" -NotePropertyValue ([string]$uj.repo) -Force
+        }
+        $uj.repo = $forkRepo
+        Save-JsonNoBom $ujPath $uj
+      }
+    }
+    # Remove old state so the next update cycle fetches fresh from the fork
+    if (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue }
+    $newState = @{
+      original_repo = $state.original_repo
+      fork_repo     = $forkRepo
+      switched_at   = (Get-Date).ToString("o")
+    }
+    Save-JsonNoBom $statePath $newState
+  }
+
+  $summary.updated_mods += "$modName (switched to fork: $forkRepo)"
+}
+
+function Switch-BackFork([string]$modName) {
+  $modPath = Join-Path $modsDirResolved $modName
+  if (-not (Test-Path -LiteralPath $modPath)) { throw "Mod folder not found: $modPath" }
+
+  $statePath    = Join-Path $modPath ".autoupdater_state.json"
+  $state        = Read-JsonIfExists $statePath
+  if (-not $state -or -not $state.original_repo) { throw "No original_repo stored in state for $modName" }
+  $originalRepo = [string]$state.original_repo
+
+  # Back up current fork version before reverting
+  Backup-Folder $modPath $modName | Out-Null
+
+  $gitDir = Join-Path $modPath ".git"
+  if (Test-Path -LiteralPath $gitDir) {
+    $newUrl    = "https://github.com/$originalRepo.git"
+    $setUrlRes = Run-Git $modPath @("remote", "set-url", "origin", $newUrl)
+    if ($setUrlRes.code -ne 0) { throw "Failed to set remote URL: " + (Short-Out $setUrlRes.out) }
+
+    $fetchRes = Run-Git $modPath @("fetch", "origin")
+    if ($fetchRes.code -ne 0) { throw "Failed to fetch from original: " + (Short-Out $fetchRes.out) }
+
+    $origBranch = Get-GitDefaultBranch $modPath
+    $resetRes   = Run-Git $modPath @("reset", "--hard", "origin/$origBranch")
+    if ($resetRes.code -ne 0) { throw "Failed to reset to original HEAD: " + (Short-Out $resetRes.out) }
+
+    $state | Add-Member -NotePropertyName "fork_repo"     -NotePropertyValue $null -Force
+    $state | Add-Member -NotePropertyName "original_repo" -NotePropertyValue $null -Force
+    $state | Add-Member -NotePropertyName "switched_at"   -NotePropertyValue (Get-Date).ToString("o") -Force
+    Save-JsonNoBom $statePath $state
+  } else {
+    # update.json mod: restore original repo field, clear state
+    $ujPath = Join-Path $modPath "update.json"
+    if (Test-Path -LiteralPath $ujPath) {
+      $uj = Read-JsonIfExists $ujPath
+      if ($uj) {
+        $uj.repo = $originalRepo
+        Save-JsonNoBom $ujPath $uj
+      }
+    }
+    if (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue }
+  }
+
+  $summary.updated_mods += "$modName (switched back to original: $originalRepo)"
+}
+
+# ---- Fork switch-back mode ----
+if ($SwitchBackModName -ne "") {
+  try {
+    Switch-BackFork $SwitchBackModName
+  } catch {
+    $summary.errors += "ERROR switching back ${SwitchBackModName}: $($_.Exception.Message)"
+  }
+  try { Save-JsonNoBom $summaryPath $summary } catch {}
+  exit 0
+}
+
+# ---- Fork switch mode ----
+if ($SwitchModName -ne "" -and $SwitchToForkRepo -ne "") {
+  try {
+    Switch-ToFork $SwitchModName $SwitchToForkRepo
+  } catch {
+    $summary.errors += "ERROR switching fork ${SwitchModName}: $($_.Exception.Message)"
+  }
+  try { Save-JsonNoBom $summaryPath $summary } catch {}
+  exit 0
+}
+
 try {
   Get-ChildItem -LiteralPath $modsDirResolved -Directory -Force | ForEach-Object {
     $name = $_.Name
@@ -892,5 +1167,12 @@ function Update-Frameworks() {
 
 
 Update-Frameworks
+
+# ---- Fork scan mode (-CheckForks) ----
+if ($CheckForks) {
+  Check-Forks
+  try { Save-JsonNoBom $summaryPath $summary } catch {}
+  exit 0
+}
 
 try { Save-JsonNoBom $summaryPath $summary } catch {}
