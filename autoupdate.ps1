@@ -608,9 +608,15 @@ function Check-Forks() {
         # Fetch original repo metadata
         $origInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/$ownerRepo" -Headers $ghHeaders
 
+        # Track whether the installed repo is itself a fork so we can check upstream
+        $installedIsFork      = $false
+        $installedForkBranch  = $null
+
         # If this repo is itself a fork, walk up to the true source repo so we
         # scan forks of the original (where the full fork network lives)
         if ($origInfo.fork -and $origInfo.source -and $origInfo.source.full_name) {
+          $installedIsFork     = $true
+          $installedForkBranch = if ($origInfo.default_branch) { [string]$origInfo.default_branch } else { "main" }
           $ownerRepo = [string]$origInfo.source.full_name
           $origInfo  = Invoke-RestMethod -Uri "https://api.github.com/repos/$ownerRepo" -Headers $ghHeaders
         }
@@ -618,10 +624,68 @@ function Check-Forks() {
         $defaultBranch = if ($origInfo.default_branch) { [string]$origInfo.default_branch } else { "main" }
         $staleThreshold = (Get-Date).AddMonths(-$ForkStalenessMonths)
 
-        # Fetch forks sorted by most recently pushed
-        $forks = Invoke-RestMethod -Uri "https://api.github.com/repos/$ownerRepo/forks?sort=pushed&per_page=10" -Headers $ghHeaders
-
         $activeForks = @()
+
+        # ── Upstream check: when installed repo is a fork, see if the source is ahead ──
+        if ($installedIsFork) {
+          try {
+            $installedParts = $installedRepo -split "/"
+            $installedOwner = $installedParts[0]
+
+            # Compare: base = installed fork branch, head = source default branch
+            # ahead_by = commits the source has that the installed fork doesn't
+            $upCompareUrl = "https://api.github.com/repos/$ownerRepo/compare/${installedOwner}:${installedForkBranch}...${defaultBranch}"
+            $upCompare    = Invoke-RestMethod -Uri $upCompareUrl -Headers $ghHeaders
+
+            $upAhead  = if ($upCompare.ahead_by)  { [int]$upCompare.ahead_by  } else { 0 }
+            $upBehind = if ($upCompare.behind_by) { [int]$upCompare.behind_by } else { 0 }
+
+            if ($upAhead -gt 0) {
+              # Build changelog from upstream's newer commits
+              $upChangelog = @()
+              if ($upCompare.commits) {
+                $limit = [Math]::Min($upCompare.commits.Count, 20)
+                for ($ci = 0; $ci -lt $limit; $ci++) {
+                  $msg = $upCompare.commits[$ci].commit.message
+                  if ($msg) {
+                    $firstLine = ($msg -split "`n")[0].Trim()
+                    $upChangelog += $firstLine
+                  }
+                }
+              }
+
+              # Check for a release on the source repo (best-effort)
+              $upRelTag   = ""
+              $upRelNotes = ""
+              try {
+                $rel        = Invoke-RestMethod -Uri "https://api.github.com/repos/$ownerRepo/releases/latest" -Headers $ghHeaders
+                $upRelTag   = if ($rel.tag_name) { [string]$rel.tag_name } else { "" }
+                $upRelNotes = if ($rel.body)     { [string]$rel.body     } else { "" }
+              } catch {}
+
+              $activeForks += @{
+                repo                 = $ownerRepo
+                owner                = ($ownerRepo -split "/")[0]
+                pushed_at            = $origInfo.pushed_at
+                stars                = [int]$origInfo.stargazers_count
+                commits_ahead        = $upAhead
+                commits_behind       = $upBehind
+                changelog            = $upChangelog
+                latest_release_tag   = $upRelTag
+                latest_release_notes = $upRelNotes
+                html_url             = [string]$origInfo.html_url
+                is_upstream          = $true
+              }
+            }
+          } catch {
+            $summary.errors += "Fork scan: error comparing upstream for '$name' ($installedRepo vs $ownerRepo): $($_.Exception.Message)"
+          }
+        }
+
+        # ── Scan forks of the source repo for ones with unique commits ──
+        # Fetch forks sorted by most recently pushed (up to 100)
+        $forks = Invoke-RestMethod -Uri "https://api.github.com/repos/$ownerRepo/forks?sort=pushed&per_page=100" -Headers $ghHeaders
+
         foreach ($fork in $forks) {
           try {
             $forkOwner    = [string]$fork.owner.login
@@ -632,10 +696,13 @@ function Check-Forks() {
             # Skip the repo the user already has installed
             if ($forkFullName -eq $installedRepo) { continue }
 
+            # Skip the source repo itself (already handled above as upstream)
+            if ($forkFullName -eq $ownerRepo) { continue }
+
             # Skip forks that haven't been pushed in over a year (truly abandoned)
             if ($forkPushedAt -lt $staleThreshold) { continue }
 
-            # Get commit comparison
+            # Get commit comparison against the source's default branch
             $compareUrl = "https://api.github.com/repos/$ownerRepo/compare/${defaultBranch}...${forkOwner}:${forkBranch}"
             $compare    = Invoke-RestMethod -Uri $compareUrl -Headers $ghHeaders
 
@@ -687,8 +754,9 @@ function Check-Forks() {
 
         if ($activeForks.Count -gt 0) {
           $suggestions.suggestions[$name] = @{
-            current_repo = $ownerRepo
-            forks        = $activeForks
+            current_repo   = $ownerRepo
+            installed_repo = $installedRepo
+            forks          = $activeForks
           }
         }
       } catch {

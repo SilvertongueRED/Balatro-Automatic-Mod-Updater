@@ -1059,7 +1059,7 @@ SMODS.current_mod.extra_tabs = function()
                   align = "cm", padding = 0.06, minw = 3.4, minh = 0.55, r = 0.1,
                   colour = amu_fork_scanning and RGBA(0.5, 0.5, 0.5, 0.9) or G.C.GREEN,
                   button = "amu_scan_forks", hover = true, shadow = true }, nodes = {
-                  { n = G.UIT.T, config = { text = "Scan for Active Forks", scale = 0.34, colour = purple } }
+                  { n = G.UIT.T, config = { text = "Scan Now", scale = 0.34, colour = purple } }
                 }},
               }},
               -- Status text
@@ -1360,11 +1360,24 @@ get_fork_mod_entries = function()
   local entries = {}
   for folder_name, data in pairs(amu_fork_suggestions.suggestions) do
     if type(data) == "table" and type(data.forks) == "table" and #data.forks > 0 then
+      -- Count upstream vs regular fork entries
+      local has_upstream = false
+      local fork_only_count = 0
+      for _, f in ipairs(data.forks) do
+        if f.is_upstream then
+          has_upstream = true
+        else
+          fork_only_count = fork_only_count + 1
+        end
+      end
       entries[#entries+1] = {
-        folder       = folder_name,
-        display      = get_display_name(folder_name),
-        current_repo = data.current_repo or folder_name,
-        forks        = data.forks,
+        folder         = folder_name,
+        display        = get_display_name(folder_name),
+        current_repo   = data.current_repo or folder_name,
+        installed_repo = data.installed_repo or data.current_repo or folder_name,
+        forks          = data.forks,
+        has_upstream   = has_upstream,
+        fork_count     = fork_only_count,
       }
     end
   end
@@ -1430,9 +1443,23 @@ local function run_fork_scan()
         local entries = get_fork_mod_entries()
         local count = #entries
         if count > 0 then
-          amu_fork_status.text = "Found " .. count .. " mod(s) with active forks!"
+          -- Count how many entries have upstream updates vs forks (can overlap)
+          local upstream_count = 0
+          local with_forks = 0
+          for _, e in ipairs(entries) do
+            if e.has_upstream then upstream_count = upstream_count + 1 end
+            if (e.fork_count or 0) > 0 then with_forks = with_forks + 1 end
+          end
+          local parts = {}
+          if upstream_count > 0 then
+            parts[#parts+1] = upstream_count .. " with newer upstream"
+          end
+          if with_forks > 0 then
+            parts[#parts+1] = with_forks .. " with active forks"
+          end
+          amu_fork_status.text = "Found " .. count .. " mod(s): " .. table.concat(parts, ", ")
         else
-          amu_fork_status.text = "No active forks found."
+          amu_fork_status.text = "No active forks or upstream updates found."
         end
         pcall(SMODS.GUI.DynamicUIManager.updateDynamicAreas, {
           ["amu_fork_mod_list"] = build_fork_mods_page(AMU_FORK_PAGE)
@@ -1613,7 +1640,8 @@ G.UIDEF.amu_fork_picker = function(ref)
   for i = 1, shown do
     local fork     = forks[i]
     local is_cur   = (cur_fork_repo == fork.repo)
-    local diverged = ((fork.commits_behind or 0) > 0) and ((fork.commits_ahead or 0) > 0)
+    local is_upstream = fork.is_upstream == true
+    local diverged = (not is_upstream) and ((fork.commits_behind or 0) > 0) and ((fork.commits_ahead or 0) > 0)
 
     -- Parse pushed_at to a short date string
     local pushed_str = tostring(fork.pushed_at or "")
@@ -1623,7 +1651,7 @@ G.UIDEF.amu_fork_picker = function(ref)
     -- Build short info line
     local info_parts = { "+" .. (fork.commits_ahead or 0) .. " commits" }
     if (fork.commits_behind or 0) > 0 then
-      info_parts[#info_parts+1] = "-" .. fork.commits_behind .. " (diverged)"
+      info_parts[#info_parts+1] = "-" .. fork.commits_behind .. (is_upstream and "" or " (diverged)")
     end
     if (fork.stars or 0) > 0 then
       info_parts[#info_parts+1] = "\226\152\133 " .. fork.stars
@@ -1640,6 +1668,19 @@ G.UIDEF.amu_fork_picker = function(ref)
       end
     end
 
+    -- Display name: upstream entries get a special prefix
+    local display_name = fork.repo or ""
+    local name_colour  = G.C.UI.TEXT_LIGHT
+    if is_upstream then
+      display_name = "\xe2\xac\x86 " .. display_name .. " (upstream)"
+      name_colour  = orange
+    elseif diverged then
+      display_name = "\226\154\160 " .. display_name
+      name_colour  = orange
+    end
+
+    local btn_text = is_upstream and "Switch to Original" or "Switch to Fork"
+
     local btn_node
     if is_cur then
       btn_node = {
@@ -1650,8 +1691,8 @@ G.UIDEF.amu_fork_picker = function(ref)
     else
       btn_node = {
         n = G.UIT.C, config = { align = "cm", padding = 0.05, minw = 1.8, minh = 0.45, r = 0.1,
-          colour = G.C.GREEN, button = "amu_switch_fork_" .. tostring(i), hover = true, shadow = true }, nodes = {
-          { n = G.UIT.T, config = { text = "Switch to Fork", scale = 0.28, colour = purple } }
+          colour = is_upstream and orange or G.C.GREEN, button = "amu_switch_fork_" .. tostring(i), hover = true, shadow = true }, nodes = {
+          { n = G.UIT.T, config = { text = btn_text, scale = 0.28, colour = purple } }
         }
       }
     end
@@ -1661,9 +1702,9 @@ G.UIDEF.amu_fork_picker = function(ref)
       { n = G.UIT.R, config = { align = "cm", padding = 0.02 }, nodes = {
         { n = G.UIT.C, config = { align = "cl", padding = 0.04, minw = 4.0 }, nodes = {
           { n = G.UIT.T, config = {
-            text = (diverged and "\226\154\160 " or "") .. fork.repo,
+            text = display_name,
             scale = 0.36,
-            colour = diverged and orange or G.C.UI.TEXT_LIGHT
+            colour = name_colour
           }}
         }},
         { n = G.UIT.B, config = { h = 0.1, w = 0.1 } },
@@ -1702,7 +1743,7 @@ G.UIDEF.amu_fork_picker = function(ref)
   if #forks == 0 then
     rows[1] = {
       n = G.UIT.R, config = { align = "cm", padding = 0.08 }, nodes = {
-        { n = G.UIT.T, config = { text = "No active forks found.", scale = 0.38, colour = purple } }
+        { n = G.UIT.T, config = { text = "No active forks or upstream updates found.", scale = 0.38, colour = purple } }
       }
     }
   end
@@ -1737,6 +1778,7 @@ build_fork_mods_page = function(page)
   AMU_FORK_PAGE = page
 
   local purple = (G.C and G.C.PURPLE) or RGBA(0.62, 0.33, 0.92, 1)
+  local orange = (G.C and G.C.ORANGE) or RGBA(0.85, 0.5, 0.05, 1)
   local rows = {}
 
   if #entries == 0 then
@@ -1759,7 +1801,8 @@ build_fork_mods_page = function(page)
         local row_i      = i - start_i + 1
         local folder     = entry.folder
         local display    = entry.display
-        local fork_count = #entry.forks
+        local fork_count = entry.fork_count or #entry.forks
+        local has_upstream = entry.has_upstream
         local is_switched = config.mod_fork_source and config.mod_fork_source[folder] ~= nil
 
         G.FUNCS["amu_view_forks_" .. row_i] = function(e)
@@ -1775,7 +1818,14 @@ build_fork_mods_page = function(page)
           switch_back_fork(folder)
         end
 
-        local fork_label = fork_count == 1 and "1 fork" or (fork_count .. " forks")
+        -- Build label showing upstream + fork counts
+        local label_parts = {}
+        if has_upstream then label_parts[#label_parts+1] = "\xe2\xac\x86 upstream" end
+        if fork_count > 0 then
+          label_parts[#label_parts+1] = fork_count == 1 and "1 fork" or (fork_count .. " forks")
+        end
+        local fork_label = table.concat(label_parts, " + ")
+        local label_colour = has_upstream and orange or (is_switched and G.C.GREEN or G.C.UI.TEXT_LIGHT)
 
         local action_btn
         if is_switched then
@@ -1801,7 +1851,7 @@ build_fork_mods_page = function(page)
           { n = G.UIT.B, config = { h = 0.1, w = 0.1 } },
           { n = G.UIT.C, config = { align = "cm", padding = 0.02, minw = 1.3 }, nodes = {
             { n = G.UIT.T, config = { text = fork_label, scale = 0.29,
-              colour = is_switched and G.C.GREEN or G.C.UI.TEXT_LIGHT } }
+              colour = label_colour } }
           }},
           { n = G.UIT.B, config = { h = 0.1, w = 0.1 } },
           action_btn,
