@@ -185,6 +185,9 @@ local function scan_mods_and_init_config()
   if not config.mod_pinned then
     config.mod_pinned = {}
   end
+  if not config.mod_fork_source then
+    config.mod_fork_source = {}
+  end
 
   local items = love.filesystem.getDirectoryItems("Mods")
   if items then
@@ -282,6 +285,8 @@ local function write_ps1_config_overlay()
     update_lovely = config.cfg_update_lovely == true,
     pinned_mods = pinned_mods,
     balatro_game_dir = "",
+    check_forks = config.check_forks == true,
+    mod_fork_source = config.mod_fork_source or {},
   }
 
   -- Auto-detect Balatro game directory from the running executable location
@@ -504,6 +509,13 @@ local amu_backup_status = { text = "" }
 local amu_restore_in_progress = false
 local build_backup_mods_page  -- forward declaration; assigned after close_overlay is defined
 
+-- Fork Finder state (forward-declared; build_fork_mods_page defined after open_overlay)
+local AMU_FORK_PAGE = 1
+local amu_fork_status = { text = "" }
+local amu_fork_scanning = false
+local amu_fork_suggestions = nil
+local build_fork_mods_page  -- forward declaration; assigned after close_overlay is defined
+
 local function get_display_name(folder_name)
   local display = folder_name
   if SMODS and SMODS.Mods then
@@ -665,6 +677,16 @@ G.FUNCS.amu_backup_mods_page = function(args)
   AMU_BACKUP_PAGE = page
   SMODS.GUI.DynamicUIManager.updateDynamicAreas({
     ["amu_backup_mod_list"] = build_backup_mods_page(page)
+  })
+end
+
+-- Fork Finder page callback
+G.FUNCS.amu_fork_mods_page = function(args)
+  if not args or not args.cycle_config then return end
+  local page = args.cycle_config.current_option or 1
+  AMU_FORK_PAGE = page
+  SMODS.GUI.DynamicUIManager.updateDynamicAreas({
+    ["amu_fork_mod_list"] = build_fork_mods_page(page)
   })
 end
 
@@ -1000,6 +1022,86 @@ SMODS.current_mod.extra_tabs = function()
         })
       end
     },
+    {
+      label = "Fork Finder",
+      tab_definition_function = function()
+        local purple = (G.C and G.C.PURPLE) or RGBA(0.62, 0.33, 0.92, 1)
+
+        -- Load suggestions if not yet cached in this session
+        if not amu_fork_suggestions then
+          amu_fork_suggestions = load_fork_suggestions()
+        end
+
+        local entries = get_fork_mod_entries()
+        local total_pages = math.max(1, math.ceil(#entries / MODS_PER_PAGE))
+        if AMU_FORK_PAGE > total_pages then AMU_FORK_PAGE = total_pages end
+        if AMU_FORK_PAGE < 1 then AMU_FORK_PAGE = 1 end
+
+        local page_options = {}
+        for p = 1, total_pages do
+          page_options[p] = "Page " .. p .. "/" .. total_pages
+        end
+
+        local static_def = {
+          n = G.UIT.R,
+          config = { align = "cm", padding = 0.05 },
+          nodes = {
+            { n = G.UIT.C, config = { align = "tm", padding = 0.05, minw = 6 }, nodes = {
+              -- Header
+              { n = G.UIT.R, config = { align = "cm", padding = 0.02 }, nodes = {
+                { n = G.UIT.T, config = { text = "Fork Finder", scale = 0.5, colour = purple, shadow = true } }
+              }},
+              -- Scan button
+              { n = G.UIT.R, config = { align = "cm", padding = 0.04 }, nodes = {
+                { n = G.UIT.C, config = {
+                  align = "cm", padding = 0.06, minw = 3.4, minh = 0.55, r = 0.1,
+                  colour = amu_fork_scanning and RGBA(0.5, 0.5, 0.5, 0.9) or G.C.GREEN,
+                  button = "amu_scan_forks", hover = true, shadow = true }, nodes = {
+                  { n = G.UIT.T, config = { text = "Scan for Active Forks", scale = 0.34, colour = purple } }
+                }},
+              }},
+              -- Status text
+              { n = G.UIT.R, config = { align = "cm", padding = 0.02 }, nodes = {
+                { n = G.UIT.T, config = { ref_table = amu_fork_status, ref_value = "text", scale = 0.3, colour = purple } }
+              }},
+              -- Dynamic placeholder for fork mod list
+              { n = G.UIT.R, config = { align = "cm", padding = 0.05, minh = 3.8, minw = 5.5 }, nodes = {
+                { n = G.UIT.O, config = { align = "cm", id = "amu_fork_mod_list", object = Moveable() } },
+              }},
+              -- Spacer
+              { n = G.UIT.B, config = { h = 0.05, w = 0.1 } },
+              -- Page selector (only when multiple pages)
+              (total_pages > 1) and {
+                n = G.UIT.R, config = { align = "cm", padding = 0.1 }, nodes = {
+                  create_option_cycle {
+                    w = 4.5,
+                    scale = 0.7,
+                    label = "",
+                    options = page_options,
+                    current_option = AMU_FORK_PAGE,
+                    opt_callback = "amu_fork_mods_page",
+                    cycle_shoulders = true,
+                    no_pips = true,
+                  }
+                }
+              } or nil,
+            }}
+          }
+        }
+
+        return SMODS.GUI.DynamicUIManager.initTab({
+          updateFunctions = {
+            amu_fork_mod_list = function(args)
+              local page = (args and args.cycle_config and args.cycle_config.current_option) or AMU_FORK_PAGE or 1
+              SMODS.GUI.DynamicUIManager.updateDynamicAreas({
+                ["amu_fork_mod_list"] = build_fork_mods_page(page)
+              })
+            end,
+          },
+          staticPageDefinition = static_def,
+        })
+      end
+    },
   }
 end
 
@@ -1227,6 +1329,491 @@ build_backup_mods_page = function(page)
     rows[#rows + 1] = { n = G.UIT.R, config = { align = "cl", padding = 0.02 }, nodes = {
       { n = G.UIT.B, config = { h = 0.38, w = 5.5 } }
     }}
+  end
+
+  return {
+    n = G.UIT.ROOT,
+    config = { align = "cm", colour = G.C.CLEAR, padding = 0.02 },
+    nodes = {
+      { n = G.UIT.C, config = { align = "cm", padding = 0 }, nodes = rows }
+    }
+  }
+end
+
+---------------------------------------------------------------------------
+-- FORK FINDER: helper functions, build_fork_mods_page, and picker overlay
+-- (defined here, after open_overlay/close_overlay are in scope)
+---------------------------------------------------------------------------
+
+local function load_fork_suggestions()
+  local mod_path = (SMODS.current_mod and SMODS.current_mod.path) or ""
+  if mod_path == "" then return nil end
+  local data = read_all(join_path(mod_path, "fork_suggestions.json"))
+  if not data then return nil end
+  return decode_json(data)
+end
+
+local function get_fork_mod_entries()
+  if not amu_fork_suggestions or not amu_fork_suggestions.suggestions then return {} end
+  local entries = {}
+  for folder_name, data in pairs(amu_fork_suggestions.suggestions) do
+    if type(data) == "table" and type(data.forks) == "table" and #data.forks > 0 then
+      entries[#entries+1] = {
+        folder       = folder_name,
+        display      = get_display_name(folder_name),
+        current_repo = data.current_repo or folder_name,
+        forks        = data.forks,
+      }
+    end
+  end
+  table.sort(entries, function(a, b) return a.display:lower() < b.display:lower() end)
+  return entries
+end
+
+local function run_fork_scan()
+  if amu_fork_scanning then return end
+  if not is_windows() then
+    amu_fork_status.text = "Windows only"
+    return
+  end
+
+  local save_dir = love.filesystem.getSaveDirectory()
+  local mods_dir = join_path(save_dir, "Mods")
+  local mod_path = (SMODS.current_mod and SMODS.current_mod.path) or join_path(mods_dir, mod_folder_name)
+
+  pcall(write_ps1_config_overlay)
+
+  local ps1 = join_path(mod_path, "autoupdate.ps1")
+  if not file_exists(ps1) then
+    amu_fork_status.text = "Missing autoupdate.ps1!"
+    return
+  end
+
+  if not (love and love.thread and love.thread.newThread and love.thread.getChannel) then
+    amu_fork_status.text = "No thread support"
+    return
+  end
+
+  amu_fork_scanning = true
+  amu_fork_status.text = "Scanning for forks... (may take a minute)"
+
+  local channel = love.thread.getChannel("amu_fork_scan")
+  channel:clear()
+
+  local cmd = table.concat({
+    "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+    "-File", safe_quote(winpath(ps1)),
+    "-ModsDir", safe_quote(winpath(mods_dir)),
+    "-SelfDir", safe_quote(winpath(mod_path)),
+    "-CheckForks",
+  }, " ")
+
+  local thread_code = [[
+    local cmd = ...
+    local ok = pcall(function() os.execute(cmd) end)
+    local ch = love.thread.getChannel("amu_fork_scan")
+    ch:push(ok and "done" or "error")
+  ]]
+  local t = love.thread.newThread(thread_code)
+  t:start(cmd)
+
+  G.E_MANAGER:add_event(Event({
+    blockable = false,
+    blocking = false,
+    func = function()
+      local msg = channel:pop()
+      if msg then
+        amu_fork_scanning = false
+        amu_fork_suggestions = load_fork_suggestions()
+        local entries = get_fork_mod_entries()
+        local count = #entries
+        if count > 0 then
+          amu_fork_status.text = "Found " .. count .. " mod(s) with active forks!"
+        else
+          amu_fork_status.text = "No active forks found."
+        end
+        pcall(SMODS.GUI.DynamicUIManager.updateDynamicAreas, {
+          ["amu_fork_mod_list"] = build_fork_mods_page(AMU_FORK_PAGE)
+        })
+        return true
+      end
+      return false
+    end
+  }))
+end
+
+local function switch_to_fork(folder_name, fork_repo)
+  if not is_windows() then
+    amu_fork_status.text = "Windows only"
+    return
+  end
+
+  if not config.mod_fork_source then config.mod_fork_source = {} end
+  config.mod_fork_source[folder_name] = {
+    fork_repo   = fork_repo,
+    switched_at = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+  }
+  pcall(write_ps1_config_overlay)
+
+  local save_dir = love.filesystem.getSaveDirectory()
+  local mods_dir = join_path(save_dir, "Mods")
+  local mod_path = (SMODS.current_mod and SMODS.current_mod.path) or join_path(mods_dir, mod_folder_name)
+  local ps1 = join_path(mod_path, "autoupdate.ps1")
+
+  if not file_exists(ps1) then
+    amu_fork_status.text = "Missing autoupdate.ps1!"
+    return
+  end
+
+  amu_fork_status.text = "Switching " .. folder_name .. " to fork..."
+
+  local cmd = table.concat({
+    "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+    "-File", safe_quote(winpath(ps1)),
+    "-ModsDir", safe_quote(winpath(mods_dir)),
+    "-SelfDir", safe_quote(winpath(mod_path)),
+    "-SwitchModName", safe_quote(folder_name),
+    "-SwitchToForkRepo", safe_quote(fork_repo),
+  }, " ")
+
+  if love and love.thread and love.thread.newThread and love.thread.getChannel then
+    local channel = love.thread.getChannel("amu_fork_switch")
+    channel:clear()
+    local thread_code = [[
+      local cmd = ...
+      local ok = pcall(function() os.execute(cmd) end)
+      local ch = love.thread.getChannel("amu_fork_switch")
+      ch:push(ok and "done" or "error")
+    ]]
+    local t = love.thread.newThread(thread_code)
+    t:start(cmd)
+    G.E_MANAGER:add_event(Event({
+      blockable = false,
+      blocking = false,
+      func = function()
+        local msg = channel:pop()
+        if msg then
+          if msg == "done" then
+            amu_fork_status.text = folder_name .. " switched to fork. Restart to apply."
+          else
+            amu_fork_status.text = folder_name .. " switch error. See last_run.json."
+          end
+          pcall(SMODS.GUI.DynamicUIManager.updateDynamicAreas, {
+            ["amu_fork_mod_list"] = build_fork_mods_page(AMU_FORK_PAGE)
+          })
+          return true
+        end
+        return false
+      end
+    }))
+  else
+    os.execute(cmd)
+    amu_fork_status.text = folder_name .. " switched to fork. Restart to apply."
+  end
+end
+
+local function switch_back_fork(folder_name)
+  if not is_windows() then
+    amu_fork_status.text = "Windows only"
+    return
+  end
+
+  if config.mod_fork_source then config.mod_fork_source[folder_name] = nil end
+  pcall(write_ps1_config_overlay)
+
+  local save_dir = love.filesystem.getSaveDirectory()
+  local mods_dir = join_path(save_dir, "Mods")
+  local mod_path = (SMODS.current_mod and SMODS.current_mod.path) or join_path(mods_dir, mod_folder_name)
+  local ps1 = join_path(mod_path, "autoupdate.ps1")
+
+  if not file_exists(ps1) then
+    amu_fork_status.text = "Missing autoupdate.ps1!"
+    return
+  end
+
+  amu_fork_status.text = "Switching " .. folder_name .. " back to original..."
+
+  local cmd = table.concat({
+    "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+    "-File", safe_quote(winpath(ps1)),
+    "-ModsDir", safe_quote(winpath(mods_dir)),
+    "-SelfDir", safe_quote(winpath(mod_path)),
+    "-SwitchBackModName", safe_quote(folder_name),
+  }, " ")
+
+  if love and love.thread and love.thread.newThread and love.thread.getChannel then
+    local channel = love.thread.getChannel("amu_fork_switchback")
+    channel:clear()
+    local thread_code = [[
+      local cmd = ...
+      local ok = pcall(function() os.execute(cmd) end)
+      local ch = love.thread.getChannel("amu_fork_switchback")
+      ch:push(ok and "done" or "error")
+    ]]
+    local t = love.thread.newThread(thread_code)
+    t:start(cmd)
+    G.E_MANAGER:add_event(Event({
+      blockable = false,
+      blocking = false,
+      func = function()
+        local msg = channel:pop()
+        if msg then
+          if msg == "done" then
+            amu_fork_status.text = folder_name .. " reverted to original. Restart to apply."
+          else
+            amu_fork_status.text = folder_name .. " revert error. See last_run.json."
+          end
+          pcall(SMODS.GUI.DynamicUIManager.updateDynamicAreas, {
+            ["amu_fork_mod_list"] = build_fork_mods_page(AMU_FORK_PAGE)
+          })
+          return true
+        end
+        return false
+      end
+    }))
+  else
+    os.execute(cmd)
+    amu_fork_status.text = folder_name .. " reverted to original. Restart to apply."
+  end
+end
+
+-- Register scan button handler
+G.FUNCS.amu_scan_forks = function(e)
+  run_fork_scan()
+end
+
+-- Overlay showing all active forks for a single mod with switch buttons.
+G.UIDEF.amu_fork_picker = function(ref)
+  local purple = (G.C and G.C.PURPLE) or RGBA(0.62, 0.33, 0.92, 1)
+  local bg     = RGBA(0.08, 0.08, 0.08, 0.96)
+  local panel  = RGBA(0.12, 0.12, 0.12, 0.96)
+  local orange = RGBA(0.85, 0.5, 0.05, 1)
+
+  local folder  = ref.folder  or ""
+  local display = ref.display or folder
+  local forks   = ref.forks   or {}
+
+  local is_switched    = config.mod_fork_source and config.mod_fork_source[folder] ~= nil
+  local cur_fork_repo  = is_switched and config.mod_fork_source[folder].fork_repo or nil
+
+  local max_show = 5
+  local shown = math.min(#forks, max_show)
+
+  for i = 1, shown do
+    local fork = forks[i]
+    G.FUNCS["amu_switch_fork_" .. tostring(i)] = function(e)
+      close_overlay()
+      switch_to_fork(folder, fork.repo)
+    end
+  end
+
+  local rows = {}
+  for i = 1, shown do
+    local fork     = forks[i]
+    local is_cur   = (cur_fork_repo == fork.repo)
+    local diverged = ((fork.commits_behind or 0) > 0) and ((fork.commits_ahead or 0) > 0)
+
+    -- Parse pushed_at to a short date string
+    local pushed_str = tostring(fork.pushed_at or "")
+    local py, pm, pd = pushed_str:match("^(%d%d%d%d)-(%d%d)-(%d%d)")
+    if py then pushed_str = py .. "-" .. pm .. "-" .. pd end
+
+    -- Build short info line
+    local info_parts = { "+" .. (fork.commits_ahead or 0) .. " commits" }
+    if (fork.commits_behind or 0) > 0 then
+      info_parts[#info_parts+1] = "-" .. fork.commits_behind .. " (diverged)"
+    end
+    if (fork.stars or 0) > 0 then
+      info_parts[#info_parts+1] = "\226\152\133 " .. fork.stars
+    end
+    local info_str = table.concat(info_parts, "  ") .. "   " .. pushed_str
+
+    -- Build changelog preview (up to 3 entries, truncated)
+    local cl_lines = {}
+    if type(fork.changelog) == "table" then
+      for j = 1, math.min(#fork.changelog, 3) do
+        local msg = tostring(fork.changelog[j] or "")
+        if #msg > 40 then msg = msg:sub(1, 37) .. "..." end
+        cl_lines[#cl_lines+1] = "  \226\128\162 " .. msg
+      end
+    end
+
+    local btn_node
+    if is_cur then
+      btn_node = {
+        n = G.UIT.C, config = { align = "cm", padding = 0.05, minw = 1.8, minh = 0.45, r = 0.1, colour = panel }, nodes = {
+          { n = G.UIT.T, config = { text = "\226\156\147 Active", scale = 0.3, colour = G.C.GREEN } }
+        }
+      }
+    else
+      btn_node = {
+        n = G.UIT.C, config = { align = "cm", padding = 0.05, minw = 1.8, minh = 0.45, r = 0.1,
+          colour = G.C.GREEN, button = "amu_switch_fork_" .. tostring(i), hover = true, shadow = true }, nodes = {
+          { n = G.UIT.T, config = { text = "Switch to Fork", scale = 0.28, colour = purple } }
+        }
+      }
+    end
+
+    local fork_rows = {
+      -- Fork name + button
+      { n = G.UIT.R, config = { align = "cm", padding = 0.02 }, nodes = {
+        { n = G.UIT.C, config = { align = "cl", padding = 0.04, minw = 4.0 }, nodes = {
+          { n = G.UIT.T, config = {
+            text = (diverged and "\226\154\160 " or "") .. fork.repo,
+            scale = 0.36,
+            colour = diverged and orange or G.C.UI.TEXT_LIGHT
+          }}
+        }},
+        { n = G.UIT.B, config = { h = 0.1, w = 0.1 } },
+        btn_node,
+      }},
+      -- Info row (commits ahead/behind, stars, date)
+      { n = G.UIT.R, config = { align = "cl", padding = 0.01 }, nodes = {
+        { n = G.UIT.T, config = { text = info_str, scale = 0.28, colour = purple } }
+      }},
+    }
+
+    -- Changelog preview lines
+    for _, cl in ipairs(cl_lines) do
+      fork_rows[#fork_rows+1] = { n = G.UIT.R, config = { align = "cl", padding = 0.005 }, nodes = {
+        { n = G.UIT.T, config = { text = cl, scale = 0.27, colour = G.C.UI.TEXT_LIGHT } }
+      }}
+    end
+
+    -- Release tag (if any)
+    if fork.latest_release_tag and fork.latest_release_tag ~= "" then
+      fork_rows[#fork_rows+1] = { n = G.UIT.R, config = { align = "cl", padding = 0.005 }, nodes = {
+        { n = G.UIT.T, config = { text = "Release: " .. fork.latest_release_tag, scale = 0.27, colour = G.C.GREEN } }
+      }}
+    end
+
+    rows[#rows+1] = {
+      n = G.UIT.R, config = { align = "cm", padding = 0.04 }, nodes = {
+        { n = G.UIT.C, config = { align = "cl", padding = 0.1, minw = 6.8, r = 0.1, colour = panel }, nodes = fork_rows }
+      }
+    }
+    if i < shown then
+      rows[#rows+1] = { n = G.UIT.B, config = { h = 0.06, w = 0.1 } }
+    end
+  end
+
+  if #forks == 0 then
+    rows[1] = {
+      n = G.UIT.R, config = { align = "cm", padding = 0.08 }, nodes = {
+        { n = G.UIT.T, config = { text = "No active forks found.", scale = 0.38, colour = purple } }
+      }
+    }
+  end
+
+  local minh = math.max(4.0, shown * 1.6 + 2.2)
+
+  return {
+    n = G.UIT.ROOT,
+    config = { align = "cm", minw = 8.2, minh = minh, padding = 0.24, r = 0.2, colour = bg, shadow = true, hover = true },
+    nodes = {
+      { n = G.UIT.R, config = { align = "cm", padding = 0.08 }, nodes = {
+        { n = G.UIT.T, config = { text = "Forks: " .. display, scale = 0.52, colour = purple, shadow = true } }
+      }},
+      { n = G.UIT.B, config = { h = 0.12, w = 0.1 } },
+      { n = G.UIT.R, config = { align = "cm", padding = 0.05 }, nodes = rows },
+      { n = G.UIT.B, config = { h = 0.14, w = 0.1 } },
+      { n = G.UIT.R, config = { align = "cm", padding = 0.08 }, nodes = {
+        { n = G.UIT.C, config = { align = "cm", padding = 0.1, minw = 2.5, minh = 0.7, r = 0.12,
+          colour = panel, button = "amu_close_prompt", hover = true, shadow = true }, nodes = {
+          { n = G.UIT.T, config = { text = "Close", scale = 0.42, colour = purple } }
+        }},
+      }},
+    }
+  }
+end
+
+-- Paginated list of mods with fork suggestions.
+build_fork_mods_page = function(page)
+  local entries = get_fork_mod_entries()
+  local total_pages = math.max(1, math.ceil(#entries / MODS_PER_PAGE))
+  page = math.max(1, math.min(page or 1, total_pages))
+  AMU_FORK_PAGE = page
+
+  local purple = (G.C and G.C.PURPLE) or RGBA(0.62, 0.33, 0.92, 1)
+  local rows = {}
+
+  if #entries == 0 then
+    -- Empty state: show a hint row
+    rows[1] = { n = G.UIT.R, config = { align = "cm", padding = 0.08 }, nodes = {
+      { n = G.UIT.T, config = { text = "No fork data. Click 'Scan' above.", scale = 0.35, colour = purple } }
+    }}
+    for _ = 2, MODS_PER_PAGE do
+      rows[#rows+1] = { n = G.UIT.R, config = { align = "cl", padding = 0.02 }, nodes = {
+        { n = G.UIT.B, config = { h = 0.38, w = 5.5 } }
+      }}
+    end
+  else
+    local start_i = (page - 1) * MODS_PER_PAGE + 1
+    local end_i   = math.min(#entries, page * MODS_PER_PAGE)
+
+    for i = start_i, end_i do
+      local entry = entries[i]
+      if entry then
+        local row_i      = i - start_i + 1
+        local folder     = entry.folder
+        local display    = entry.display
+        local fork_count = #entry.forks
+        local is_switched = config.mod_fork_source and config.mod_fork_source[folder] ~= nil
+
+        G.FUNCS["amu_view_forks_" .. row_i] = function(e)
+          open_overlay(G.UIDEF.amu_fork_picker({
+            folder       = folder,
+            display      = display,
+            forks        = entry.forks,
+            current_repo = entry.current_repo,
+          }))
+        end
+
+        G.FUNCS["amu_switch_back_fork_" .. row_i] = function(e)
+          switch_back_fork(folder)
+        end
+
+        local fork_label = fork_count == 1 and "1 fork" or (fork_count .. " forks")
+
+        local action_btn
+        if is_switched then
+          action_btn = {
+            n = G.UIT.C, config = { align = "cm", padding = 0.04, minw = 1.3, minh = 0.38, r = 0.09,
+              colour = G.C.RED, button = "amu_switch_back_fork_" .. row_i, hover = true, shadow = true }, nodes = {
+              { n = G.UIT.T, config = { text = "Switch Back", scale = 0.26, colour = G.C.UI.TEXT_LIGHT } }
+            }
+          }
+        else
+          action_btn = {
+            n = G.UIT.C, config = { align = "cm", padding = 0.04, minw = 1.1, minh = 0.38, r = 0.09,
+              colour = G.C.BLUE, button = "amu_view_forks_" .. row_i, hover = true, shadow = true }, nodes = {
+              { n = G.UIT.T, config = { text = "View Forks", scale = 0.26, colour = G.C.UI.TEXT_LIGHT } }
+            }
+          }
+        end
+
+        rows[#rows+1] = { n = G.UIT.R, config = { align = "cl", padding = 0.02 }, nodes = {
+          { n = G.UIT.C, config = { align = "cl", padding = 0.02, minw = 2.8 }, nodes = {
+            { n = G.UIT.T, config = { text = display, scale = 0.4, colour = G.C.UI.TEXT_LIGHT } }
+          }},
+          { n = G.UIT.B, config = { h = 0.1, w = 0.1 } },
+          { n = G.UIT.C, config = { align = "cm", padding = 0.02, minw = 1.3 }, nodes = {
+            { n = G.UIT.T, config = { text = fork_label, scale = 0.29,
+              colour = is_switched and G.C.GREEN or G.C.UI.TEXT_LIGHT } }
+          }},
+          { n = G.UIT.B, config = { h = 0.1, w = 0.1 } },
+          action_btn,
+        }}
+      end
+    end
+
+    -- Pad remaining rows to keep height consistent
+    local shown = end_i - start_i + 1
+    for _ = shown + 1, MODS_PER_PAGE do
+      rows[#rows+1] = { n = G.UIT.R, config = { align = "cl", padding = 0.02 }, nodes = {
+        { n = G.UIT.B, config = { h = 0.38, w = 5.5 } }
+      }}
+    end
   end
 
   return {
